@@ -2,3 +2,5 @@
 tiktoken>=0.3.3
 transformers[torch]
 huggingface_hub[hf_xet]
+datasets
+tqdm
