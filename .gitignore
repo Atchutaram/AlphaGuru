@@ -1,7 +1,9 @@
 # Ignore data log folders
 log/
+log_sft/
 hellaswag/
 edu_fineweb10B/
+oasst_sft/
 # Ignore virtual environment
 venv/
 

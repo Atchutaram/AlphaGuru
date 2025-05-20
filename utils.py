@@ -64,6 +64,61 @@ class DataLoaderLite:
             self.current_position = B * T * self.process_rank
         return x, y
 
+class SFTDataLoaderLite:
+    def __init__(self, B, device, process_rank, num_processes, split, master_process):
+        self.B = B
+        self.device = device
+        self.process_rank = process_rank
+        self.num_processes = num_processes
+        assert split in {'train', 'val'}, "split must be 'train' or 'val'"
+
+        data_root = "oasst_sft"
+        shards = sorted([
+            os.path.join(data_root, f) for f in os.listdir(data_root)
+            if split in f
+        ])
+        assert shards, f"No shards found for split {split} in {data_root}"
+        if master_process:
+            print(f"found {len(shards)} OASST SFT shards for split {split}")
+        self.shards = shards
+        self.reset()
+
+    def reset(self):
+        self.current_shard = 0
+        self.examples = torch.load(self.shards[self.current_shard])
+        self.current_position = self.B * self.process_rank
+
+    def _pad_batch(self, examples):
+        """
+        Pads input_ids and labels to the max length in batch.
+        """
+        max_len = max(e['input_ids'].size(0) for e in examples)
+        input_ids = torch.full((len(examples), max_len), fill_value=0, dtype=torch.long)
+        labels = torch.full((len(examples), max_len), fill_value=-100, dtype=torch.long)
+        for i, ex in enumerate(examples):
+            length = ex['input_ids'].size(0)
+            input_ids[i, :length] = ex['input_ids']
+            labels[i, :length] = ex['labels']
+        return input_ids.to(self.device), labels.to(self.device)
+
+    def next_batch(self):
+        B = self.B
+        batch = []
+        while len(batch) < B:
+            if self.current_position >= len(self.examples):
+                self.current_shard = (self.current_shard + 1) % len(self.shards)
+                self.examples = torch.load(self.shards[self.current_shard])
+                self.current_position = self.B * self.process_rank
+
+            idx = self.current_position
+            step = self.num_processes
+            while len(batch) < B and idx < len(self.examples):
+                batch.append(self.examples[idx])
+                idx += step
+            self.current_position = idx
+
+        return self._pad_batch(batch)
+
 def safe_compile(model):
     try:
         compiled_model = torch.compile(model)
