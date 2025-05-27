@@ -122,14 +122,22 @@ class SFTDataLoaderLite:
 def safe_compile(model):
     try:
         compiled_model = torch.compile(model)
-        # Try a dry-run forward pass to catch runtime errors (like TritonMissing)
+        # Dry-run to catch runtime errors
         with torch.no_grad():
             compiled_model(torch.randn(4, 1024), torch.randn(4, 1024))
         return compiled_model
     except Exception as e:
-        
-        print("[torch.compile] Falling back to eager mode.")
-        return torch.compile(model, backend="eager")
+        print("[torch.compile] Falling back to eager mode due to:", repr(e))
+        try:
+            eager_model = torch.compile(model, backend="eager")
+            # Dry-run to catch runtime errors
+            with torch.no_grad():
+                eager_model(torch.randn(4, 1024), torch.randn(4, 1024))
+            return eager_model
+        except Exception as e2:
+            print("[torch.compile] Eager mode also failed during dry-run. Returning original model. Error:", repr(e2))
+            return model
+
 
 def get_most_likely_row(tokens, mask, logits):
     # evaluate the autoregressive loss at all positions

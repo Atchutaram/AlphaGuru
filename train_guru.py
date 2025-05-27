@@ -39,7 +39,7 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed(1337)
 
 total_batch_size = 524288  # 2**19, 0.5M tokens
-B = 4 if ddp_world_size == 1 else 64 # micro batch
+B = 4 if torch.cuda.get_device_properties(0).total_memory / 1024**3 == 1 else 16 # micro batch
 T = 1024 # Tokens per row
 assert total_batch_size % (B * T * ddp_world_size) == 0, \
     'make sure total_batch_size is a divisible by B * T * ddp_world_size'
@@ -49,7 +49,7 @@ if master_process:
     print(f'=> calculated gradient accumulation steps: {grad_accum_steps}')
 
 num_steps_per_epoch = int(1e10 / total_batch_size) # data size in number of tokens / tokens in a batch
-max_steps = 1 * num_steps_per_epoch
+max_steps = 6 * num_steps_per_epoch
 
 train_loader = DataLoaderLite(B=B, T=T, device=device, process_rank=ddp_rank, \
     num_processes=ddp_world_size, split="train", master_process = master_process)
@@ -61,7 +61,7 @@ torch.set_float32_matmul_precision('high')
 
 model = Guru(GPTConfig(vocab_size=50304))
 model.to(device)
-model = safe_compile(model)
+model = safe_compile(model, master_process)
 if ddp:
     model = DDP(model, device_ids= [ddp_local_rank])
 
@@ -75,7 +75,9 @@ with open(log_file, "w") as f:
 enc = tiktoken.get_encoding("gpt2")
 
 val_freq = 250
-optimizer = raw_model.configure_optimizers(weight_decay=0.1, learning_rate=6e-4, device=device)
+optimizer = raw_model.configure_optimizers(weight_decay=0.1, learning_rate=6e-4, device=device,\
+                                           master_process=master_process)
+# for step in range(max_steps):
 for step in range(max_steps):
     t0 = time.time()
     last_step = (step == max_steps - 1)
